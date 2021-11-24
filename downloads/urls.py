@@ -15,8 +15,9 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include,path
-from .views import VideoDownloads
+from .views import VideoDownloads, sendMail
 
 urlpatterns = [
     path('url', VideoDownloads.as_view()),
+    path('email', sendMail),
 ]

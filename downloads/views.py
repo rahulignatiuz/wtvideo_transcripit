@@ -1,6 +1,7 @@
 import os
 import random
 import string
+import time
 import speech_recognition as sr
 from moviepy.video.io import ffmpeg_tools
 from rest_framework.views import APIView
@@ -9,6 +10,11 @@ from rest_framework import status
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
 from pathlib import Path
+import azure.cognitiveservices.speech as speechsdk
+from .forms import EmailForm
+from django.core.mail import send_mail
+from django.conf import settings
+from django.shortcuts import render
 
 
 class VideoDownloads(APIView):
@@ -16,18 +22,31 @@ class VideoDownloads(APIView):
         url = request.data['url']
         file_path = self.addFile(url)
         if file_path:
-            text = self.get_large_audio_transcription(file_path)
-            if text:
-                p = Path(file_path)
-                dir = p.parent
-                print(dir)
-                for f in os.listdir(dir):
-                    os.remove(os.path.join(dir, f))
-                content = {
-                    "status": "success",
-                    "Transcription": text
-                }
-                return Response(content, status=status.HTTP_201_CREATED)
+            # text = self.get_large_audio_transcription(file_path)
+            list_result = self.speech_recognize_continuous_from_file(file_path)
+
+            if list_result:
+                try:
+                    text = self.listToString(list_result)
+                    p = Path(file_path)
+                    dir = p.parent
+                    print(dir)
+                    for f in os.listdir(dir):
+                        os.remove(os.path.join(dir, f))
+                    content = {
+                        "status": "success",
+                        "transcription_in_text": text,
+                        "transcription_in_list": list_result,
+                    }
+
+                    return Response(content, status=status.HTTP_201_CREATED)
+                except Exception as e:
+                    content = {
+                        "status": "failure",
+                        "error": e,
+                        "return": list_result
+                    }
+                    return Response(content, status=status.HTTP_400_BAD_REQUEST)
         content = {
             "status": "failure"
         }
@@ -45,6 +64,59 @@ class VideoDownloads(APIView):
             return file_path
         except Exception as e:
             return False
+
+    def speech_recognize_continuous_from_file(self, path):
+        """performs continuous speech recognition with input from an audio file"""
+        # <SpeechContinuousRecognitionWithFile>
+        try:
+            subscription_key = " 06a79298e24448b39ccca9d5d1ad8535"
+            speech_region = "eastus"
+            speech_config = speechsdk.SpeechConfig(subscription=subscription_key, region=speech_region)
+            audio_config = speechsdk.audio.AudioConfig(filename=path)
+            speech_recognizer = speechsdk.SpeechRecognizer(speech_config=speech_config, audio_config=audio_config)
+            done = False
+
+            def stop_cb(evt):
+                """callback that signals to stop continuous recognition upon receiving an event `evt`"""
+                print('CLOSING on {}'.format(evt))
+                nonlocal done
+                done = True
+
+            all_results = []
+
+            def handle_final_result(evt):
+                all_results.append(evt.result.text)
+
+            speech_recognizer.recognized.connect(handle_final_result)
+            # Connect callbacks to the events fired by the speech recognizer
+            speech_recognizer.recognizing.connect(lambda evt: print('RECOGNIZING: {}'.format(evt)))
+            speech_recognizer.recognized.connect(lambda evt: print('RECOGNIZED: {}'.format(evt)))
+            speech_recognizer.session_started.connect(lambda evt: print('SESSION STARTED: {}'.format(evt)))
+            speech_recognizer.session_stopped.connect(lambda evt: print('SESSION STOPPED {}'.format(evt)))
+            speech_recognizer.canceled.connect(lambda evt: print('CANCELED {}'.format(evt)))
+            # stop continuous recognition on either session stopped or canceled events
+            speech_recognizer.session_stopped.connect(stop_cb)
+            speech_recognizer.canceled.connect(stop_cb)
+
+            # Start continuous speech recognition
+            speech_recognizer.start_continuous_recognition()
+            while not done:
+                time.sleep(.5)
+
+            speech_recognizer.stop_continuous_recognition()
+            return all_results
+        except Exception as e:
+            return e
+
+    # Python program to convert a list
+    # to string using join() function
+
+    # Function to convert
+    def listToString(selt, s):
+        # initialize an empty string
+        str1 = " "
+        # return string
+        return (str1.join(s))
 
     def get_large_audio_transcription(self, path):
         """
@@ -76,15 +148,42 @@ class VideoDownloads(APIView):
             audio_chunk.export(chunk_filename, format="wav")
             # recognize the chunk
             with sr.AudioFile(chunk_filename) as source:
+                # r.adjust_for_ambient_noise(source)
+                # audio_listened = r.listen(source)
                 audio_listened = r.record(source)
                 # try converting it to text
                 try:
-                    text = r.recognize_google(audio_listened)
+                    text = r.recognize_ibm(audio_listened)
                 except sr.UnknownValueError as e:
-                    print("Error:", str(e))
+                    print("Could not understand audio")
+                    # print("Error:", str(e))
                 else:
                     text = f"{text.capitalize()}. "
                     print(chunk_filename, ":", text)
                     whole_text += text
         # return the text for all chunks detected
         return whole_text
+
+
+def sendMail(request):
+    # create a variable to keep track of the form
+    messageSent = False
+    # check if form has been submitted
+    if request.method == 'POST':
+        form = EmailForm(request.POST)
+        # check if data from the form is clean
+        if form.is_valid():
+            cd = form.cleaned_data
+            subject = "Sending an email with Django"
+            message = cd['message']
+            print(message)
+            # send the email to the recipent
+            send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [cd['recipient']])
+            # set the variable initially created to True
+            messageSent = True
+    else:
+        form = EmailForm()
+    return render(request, 'index.html', {
+        'form': form,
+        'messageSent': messageSent,
+    })
