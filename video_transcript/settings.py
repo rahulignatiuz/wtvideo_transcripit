@@ -35,10 +35,39 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.sites',
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google',
     'rest_framework',
-    'downloads'
+    'downloads',
+    'crispy_forms',
+    'graph_making',
+    'edit_video',
+    'corsheaders',
+    'aws_transcript'
 ]
-
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend'
+]
+CRISPY_TEMPLATE_PACK = 'bootstrap4'
+#DB_PREFIX = "djnago_"
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': [
+            'profile',
+            'email',
+        ],
+        'AUTH_PARAMS': {
+            'access_type': 'online',
+        }
+    }
+}
+SITE_ID = 2
+LOGIN_REDIRECT_URL = '/'
+LOGOUT_REDIRECT_URL = '/'
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -47,10 +76,15 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.common.CommonMiddleware',
 ]
+CORS_ORIGIN_ALLOW_ALL = True
+CORS_ORIGIN_WHITELIST = ['http://20.109.157.87',
+                         'https://stage.webtalkx.com',
+                         'http://localhost:8000']
 
 ROOT_URLCONF = 'video_transcript.urls'
-
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -63,6 +97,9 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
             ],
+            'libraries': {
+                'staticfiles': 'django.templatetags.static',
+            }
         },
     },
 ]
@@ -72,18 +109,49 @@ WSGI_APPLICATION = 'video_transcript.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/3.2/ref/settings/#databases
 
+# sqlite
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'db.sqlite3',
+#     }
+# }
+# MySQL
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'transcript',
+        'USER': 'root',
+        'PASSWORD': 'root',
+        'HOST': 'localhost',
+        'PORT': '3306',
     }
 }
-DEFAULT_FROM_EMAIL = 'no-reply@ignatiuz.onmicrosoft.com'
+# mongoDB
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'djongo',
+#         'NAME': 'django',
+#     }
+# }
+# DATABASES = {
+#     "default": {
+#         "ENGINE": "mssql",
+#         "NAME": "R360STG",
+#         "USER": "sa",
+#         "PASSWORD": "A@p$D8S3Rv3R",
+#         "HOST": "appsdb.ignatiuz.com ",
+#         "PORT": "1433",
+#         "OPTIONS": {"driver": "ODBC Driver 17 for SQL Server",
+#                     },
+#     },
+# }
+DEFAULT_FROM_EMAIL = 'no-reply@ignatiuz.com'
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.office365.com'
 EMAIL_USE_TLS = True
 EMAIL_PORT = 587
-EMAIL_HOST_USER = 'no-reply@ignatiuz.onmicrosoft.com'
+EMAIL_HOST_USER = 'no-reply@ignatiuz.com'
 EMAIL_HOST_PASSWORD = 'BizDev#007'
 
 # Password validation
@@ -122,8 +190,12 @@ USE_TZ = True
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 MEDIA_URL = '/media/'
 STATIC_URL = '/static/'
-
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static')
+]
 # Default primary key field type
 # https://docs.djangoproject.com/en/3.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+AWS_ACCESS_KEY_ID = 'AKIA4QQVBFBJWMYTMXTR'
+AWS_SECRET_ACCESS_KEY = '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'

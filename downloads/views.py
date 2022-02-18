@@ -1,8 +1,16 @@
 import os
+import boto3
+import urllib
+import json
 import random
 import string
 import time
+import ffmpeg
 import speech_recognition as sr
+import azure.cognitiveservices.speech as speechsdk
+from django.contrib import messages
+from django.contrib.auth import login, authenticate, logout
+from django.contrib.auth.forms import AuthenticationForm
 from moviepy.video.io import ffmpeg_tools
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -10,11 +18,81 @@ from rest_framework import status
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
 from pathlib import Path
-import azure.cognitiveservices.speech as speechsdk
-from .forms import EmailForm
+from .forms import EmailForm, NewUserForm
 from django.core.mail import send_mail
 from django.conf import settings
-from django.shortcuts import render
+from django.shortcuts import render, redirect
+from django.views.decorators.csrf import csrf_protect
+from moviepy.editor import *
+from botocore.exceptions import NoCredentialsError
+
+
+class AWSTranscribe(APIView):
+    def post(self, request, format=None):
+        url = request.data['url']
+
+        s3_url = self.upload_file_s3(url)
+        result = self.speech_to_text(s3_url)
+
+        content = {
+            "status": "Success",
+            "result": result
+        }
+        return Response(content, status=status.HTTP_201_CREATED)
+
+    def speech_to_text(self, url):
+        AWS_ACCESS_KEY_ID = 'AKIA4QQVBFBJWMYTMXTR'
+        AWS_SECRET_ACCESS_KEY = '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'
+        job_name = self.getRandomText()
+        job_uri = url
+        transcribe = boto3.client('transcribe', aws_access_key_id=AWS_ACCESS_KEY_ID,
+                                  aws_secret_access_key=AWS_SECRET_ACCESS_KEY, region_name='us-east-1')
+        transcribe.start_transcription_job(TranscriptionJobName=job_name, Media={'MediaFileUri': job_uri},
+                                           MediaFormat='mp4', LanguageCode='en-US')
+        while True:
+            status = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+            if status['TranscriptionJob']['TranscriptionJobStatus'] in ['COMPLETED', 'FAILED']:
+                break
+            print("Not ready yet...")
+            time.sleep(2)
+        print(status)
+
+        if status['TranscriptionJob']['TranscriptionJobStatus'] == 'COMPLETED':
+            response = urllib.request.urlopen(status['TranscriptionJob']['Transcript']['TranscriptFileUri'])
+            data = json.loads(response.read())
+            # text = data['results']['transcripts'][0]['transcript']
+        return data
+
+    def upload_file_s3(self, url):
+        AWS_ACCESS_KEY_ID = 'AKIA4QQVBFBJWMYTMXTR'
+        AWS_SECRET_ACCESS_KEY = 'DuXuCv2yuoj54w83wiH8vwbmTwruojJCauyAbmMS'
+        file_name = self.getRandomText() + ".mp4"
+        download_path = "media/" + file_name
+        upload_path = "samples/" + file_name
+        bucket_name = 'webtalkxscript'
+
+        s3 = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY_ID, aws_secret_access_key=AWS_SECRET_ACCESS_KEY)
+        urllib.request.urlretrieve(url, download_path)
+        try:
+            s3.upload_file(download_path, bucket_name, upload_path)
+            pull_upload_path = "https://webtalkxscript.s3.amazonaws.com/" + upload_path
+            print("Upload Successful")
+            if os.path.exists(download_path):
+                os.remove(download_path)
+            else:
+                print("The file does not exist")
+            return pull_upload_path
+        except FileNotFoundError:
+            print("The file was not found")
+            return False
+        except NoCredentialsError:
+            print("Credentials not available")
+            return False
+
+    def getRandomText(self):
+        char_set = string.ascii_uppercase + string.digits
+        random_text = ''.join(random.sample(char_set * 6, 6))
+        return random_text
 
 
 class VideoDownloads(APIView):
@@ -67,7 +145,6 @@ class VideoDownloads(APIView):
 
     def speech_recognize_continuous_from_file(self, path):
         """performs continuous speech recognition with input from an audio file"""
-        # <SpeechContinuousRecognitionWithFile>
         try:
             subscription_key = " 06a79298e24448b39ccca9d5d1ad8535"
             speech_region = "eastus"
@@ -187,3 +264,52 @@ def sendMail(request):
         'form': form,
         'messageSent': messageSent,
     })
+
+
+@csrf_protect
+def register_request(request):
+    if request.method == "POST":
+        form = NewUserForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            login(request, user)
+            messages.success(request, "Registration successful.")
+            return redirect("r_success")
+        messages.error(request, "Unsuccessful registration. Invalid information.")
+    form = NewUserForm()
+    return render(request=request, template_name="downloads/register.html", context={"register_form": form})
+
+
+def login_request(request):
+    full_path = os.path.realpath(__file__)
+    print(os.path.join(os.path.dirname(full_path), "templates", "file.txt"))
+    if request.method == "POST":
+        form = AuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            username = form.cleaned_data.get('username')
+            password = form.cleaned_data.get('password')
+            user = authenticate(username=username, password=password)
+            if user is not None:
+                login(request, user)
+                messages.info(request, f"You are now logged in as {username}.")
+                return redirect("l_success")
+            else:
+                messages.error(request, "Invalid username or password.")
+        else:
+            messages.error(request, "Invalid username or password.")
+    form = AuthenticationForm()
+
+    return render(request=request, template_name="downloads/login.html", context={"login_form": form})
+
+
+def register_success(request):
+    return render(request=request, template_name="downloads/register_success.html")
+
+
+def login_success(request):
+    return render(request=request, template_name="downloads/login_success.html")
+
+
+def logout_request(request):
+    logout(request)
+    return redirect("login")
